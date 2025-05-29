@@ -1,0 +1,50 @@
+# STM32CubeIDE specific
+.settings/
+.metadata/
+[Dd]ebug/
+[Rr]elease/
+.launch
+*.elf
+*.hex
+*.bin
+*.list
+*.map
+*.d
+*.o
+*.su
+*.mk
+*.cyclo
+*.build_log.htm
+
+# STM32CubeMX generated output
+*.gpdsc
+
+# IDE specific
+*.launch
+.mxproject
+
+# Build directories
+out/
+build/
+temp/
+
+# VS Code specific
+.vscode/
+
+# macOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux specific
+*~
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
