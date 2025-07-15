@@ -1,50 +1,123 @@
-# STM32CubeIDE specific
+# STM32CubeIDE / Eclipse IDE
+.cproject
+.project
 .settings/
-.metadata/
-[Dd]ebug/
-[Rr]elease/
 .launch
+*.launch
+.metadata/
+.recommenders/
+
+# Build directories
+Debug/
+Release/
+build/
+Build/
+
+# Object files
+*.o
+*.obj
 *.elf
 *.hex
 *.bin
-*.list
 *.map
-*.d
-*.o
+*.list
 *.su
-*.mk
 *.cyclo
-*.build_log.htm
+*.d
 
-# STM32CubeMX generated output
-*.gpdsc
+# Compiled libraries
+*.lib
+*.a
+*.la
+*.lo
 
-# IDE specific
-*.launch
-.mxproject
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
 
-# Build directories
-out/
-build/
-temp/
+# Executables
+*.exe
+*.out
+*.app
+*.elf
 
-# VS Code specific
-.vscode/
+# ST-specific files
+*.stm32
+*.ioc.bak
+*.ioc.tmp
 
-# macOS specific
+# Log files
+*.log
+*.tmp
+*.temp
+
+# OS generated files
 .DS_Store
-.AppleDouble
-.LSOverride
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Windows specific
-Thumbs.db
-ehthumbs.db
 Desktop.ini
+$RECYCLE.BIN/
 
-# Linux specific
+# Node.js (for websocket directory)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
 *~
 
-# Logs and databases
-*.log
-*.sql
-*.sqlite
+# Configuration files with sensitive data
+config.h
+secrets.h
+credentials.h
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Generated documentation
+docs/html/
+docs/latex/
+
+# Coverage reports
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# Profiling data
+*.prof
+
+# Archive files
+*.zip
+*.tar.gz
+*.rar
+
+# Personal/temporary files
+TODO.txt
+NOTES.txt
+test_*
+temp_*

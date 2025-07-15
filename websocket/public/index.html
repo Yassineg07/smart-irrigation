@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Irrigation System Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .dashboard {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: 10px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-connected {
+            background-color: #4CAF50;
+        }
+
+        .status-disconnected {
+            background-color: #f44336;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .widgets-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .widget {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .widget:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 35px rgba(0,0,0,0.15);
+        }
+
+        .widget-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .widget-icon {
+            font-size: 2rem;
+            margin-right: 15px;
+        }
+
+        .widget-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .sensor-data {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        .sensor-item {
+            flex: 1;
+            text-align: center;
+            padding: 15px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 10px;
+        }
+
+        .sensor-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+            transition: color 0.3s ease;
+        }
+
+        .sensor-value.temperature-alert {
+            color: #e74c3c;
+            animation: temperatureAlert 2s infinite;
+        }
+
+        @keyframes temperatureAlert {
+            0% { color: #e74c3c; }
+            50% { color: #c0392b; }
+            100% { color: #e74c3c; }
+        }
+
+        .sensor-label {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .motor-status {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .motor-indicator {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            color: white;
+            transition: all 0.3s ease;
+        }
+
+        .motor-on {
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            animation: rotate 2s linear infinite;
+        }
+
+        .motor-off {
+            background: linear-gradient(135deg, #f44336, #d32f2f);
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .motor-text {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .control-label {
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #667eea;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        .manual-controls {
+            opacity: 0.3;
+            pointer-events: none;
+            transition: all 0.3s ease;
+        }
+
+        .manual-controls.enabled {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .last-update {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .logs {
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            color: #555;
+        }
+
+        .log-time {
+            color: #888;
+            font-weight: 500;
+        }
+
+        /* SMS Alert Widget Styles */
+        .sms-alert-widget {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+            z-index: 1000;
+            min-width: 300px;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+        }
+
+        .sms-alert-widget.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .sms-alert-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .sms-alert-icon {
+            font-size: 1.5rem;
+            margin-right: 10px;
+        }
+
+        .sms-alert-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .sms-alert-message {
+            font-size: 1rem;
+            margin-bottom: 10px;
+        }
+
+        .sms-cooldown {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9rem;
+            margin-top: 10px;
+        }
+
+        .cooldown-timer {
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .cooldown-bar {
+            flex: 1;
+            height: 4px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .cooldown-progress {
+            height: 100%;
+            background: rgba(255,255,255,0.8);
+            border-radius: 2px;
+            transition: width 1s linear;
+        }
+
+        @media (max-width: 768px) {
+            .widgets-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .sensor-data {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .control-group {
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <h1>🌱 Smart Irrigation System</h1>
+            <p>Real-time monitoring and control
+                <span id="connectionStatus" class="status-indicator status-disconnected"></span>
+            </p>
+        </div>
+
+        <div class="widgets-grid">
+            <!-- Sensor Data Widget -->
+            <div class="widget">
+                <div class="widget-header">
+                    <div class="widget-icon">🌡️</div>
+                    <div class="widget-title">Environmental Sensors</div>
+                </div>
+                <div class="sensor-data">
+                    <div class="sensor-item">
+                        <div class="sensor-value" id="temperature">--</div>
+                        <div class="sensor-label">Temperature °C</div>
+                    </div>
+                    <div class="sensor-item">
+                        <div class="sensor-value" id="humidity">--</div>
+                        <div class="sensor-label">Humidity %</div>
+                    </div>
+                </div>
+                <div class="last-update">
+                    Last updated: <span id="lastUpdate">Never</span>
+                </div>
+            </div>
+
+            <!-- Motor Status Widget -->
+            <div class="widget">
+                <div class="widget-header">
+                    <div class="widget-icon">💧</div>
+                    <div class="widget-title">Water Pump Status</div>
+                </div>
+                <div class="motor-status">
+                    <div class="motor-indicator motor-off" id="motorIndicator">
+                        ⚡
+                    </div>
+                    <div class="motor-text" id="motorStatus">Motor OFF</div>
+                </div>
+            </div>
+
+            <!-- Control Panel Widget -->
+            <div class="widget">
+                <div class="widget-header">
+                    <div class="widget-icon">🎛️</div>
+                    <div class="widget-title">Control Panel</div>
+                </div>
+                <div class="controls">
+                    <div class="control-group">
+                        <span class="control-label">Operation Mode</span>
+                        <label class="switch">
+                            <input type="checkbox" id="modeSwitch">
+                            <span class="slider"></span>
+                        </label>
+                        <span id="modeLabel">AUTO</span>
+                    </div>
+                    
+                    <div class="control-group manual-controls" id="manualControls">
+                        <span class="control-label">Manual Motor Control</span>
+                        <label class="switch">
+                            <input type="checkbox" id="motorSwitch">
+                            <span class="slider"></span>
+                        </label>
+                        <span id="manualMotorLabel">OFF</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Information Widget -->
+            <div class="widget">
+                <div class="widget-header">
+                    <div class="widget-icon">📊</div>
+                    <div class="widget-title">System Information</div>
+                </div>
+                <div class="sensor-data">
+                    <div class="sensor-item">
+                        <div class="sensor-value" id="currentMode">AUTO</div>
+                        <div class="sensor-label">Current Mode</div>
+                    </div>
+                    <div class="sensor-item">
+                        <div class="sensor-value" id="pumpStatus">OFF</div>
+                        <div class="sensor-label">Pump Status</div>
+                    </div>
+                </div>
+                <div class="logs" id="systemLogs">
+                    <div class="log-entry">System started...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SMS Alert Widget -->
+    <div class="sms-alert-widget" id="smsAlertWidget">
+        <div class="sms-alert-header">
+            <div class="sms-alert-icon">📱</div>
+            <div class="sms-alert-title" id="smsAlertTitle">Sending SMS Alert...</div>
+        </div>
+        <div class="sms-alert-message" id="smsAlertMessage">Temperature threshold reached!</div>
+        <div class="sms-cooldown" id="smsCooldown" style="display: none;">
+            <span>Next alert in:</span>
+            <span class="cooldown-timer" id="cooldownTimer">30s</span>
+            <div class="cooldown-bar">
+                <div class="cooldown-progress" id="cooldownProgress"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class IrrigationDashboard {
+            constructor() {
+                this.ws = null;
+                this.connectionStatus = document.getElementById('connectionStatus');
+                this.modeSwitch = document.getElementById('modeSwitch');
+                this.motorSwitch = document.getElementById('motorSwitch');
+                this.manualControls = document.getElementById('manualControls');
+                this.smsAlertWidget = document.getElementById('smsAlertWidget');
+                this.cooldownTimer = null;
+                this.temperatureThreshold = 33.0; // Should match the threshold in main.c
+                
+                this.initializeWebSocket();
+                this.setupEventListeners();
+            }
+
+            initializeWebSocket() {
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${wsProtocol}//${window.location.host}`;
+                
+                this.ws = new WebSocket(wsUrl);
+
+                this.ws.onopen = () => {
+                    console.log('Connected to WebSocket server');
+                    this.updateConnectionStatus(true);
+                    this.addLog('Connected to irrigation system');
+                };
+
+                this.ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleMessage(data);
+                    } catch (error) {
+                        console.error('Error parsing WebSocket message:', error);
+                    }
+                };
+
+                this.ws.onclose = () => {
+                    console.log('Disconnected from WebSocket server');
+                    this.updateConnectionStatus(false);
+                    this.addLog('Disconnected from irrigation system');
+                    
+                    // Attempt to reconnect after 3 seconds
+                    setTimeout(() => {
+                        this.initializeWebSocket();
+                    }, 3000);
+                };
+
+                this.ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.addLog('Connection error occurred');
+                };
+            }
+
+            handleMessage(data) {
+                switch (data.type) {
+                    case 'connection':
+                        if (data.data) {
+                            this.updateSystemState(data.data);
+                        }
+                        break;
+                        
+                    case 'sensor_data':
+                        this.updateSensorData(data.data);
+                        break;
+                        
+                    case 'motor_status':
+                        this.updateMotorStatus(data.state);
+                        break;
+                        
+                    case 'mode_status':
+                        this.updateModeStatus(data.mode);
+                        break;
+                        
+                    case 'system_status':
+                        this.updateSystemState(data.data);
+                        break;
+                        
+                    case 'sms_alert':
+                        this.showSMSAlert(data.message, data.status);
+                        break;
+                }
+            }
+
+            updateConnectionStatus(connected) {
+                if (connected) {
+                    this.connectionStatus.className = 'status-indicator status-connected';
+                } else {
+                    this.connectionStatus.className = 'status-indicator status-disconnected';
+                }
+            }
+
+            updateSensorData(data) {
+                const temperatureElement = document.getElementById('temperature');
+                const humidityElement = document.getElementById('humidity');
+                
+                temperatureElement.textContent = data.temperature.toFixed(1);
+                humidityElement.textContent = data.humidity.toFixed(1);
+                
+                // Check if temperature exceeds threshold and add alert styling
+                if (data.temperature >= this.temperatureThreshold) {
+                    temperatureElement.classList.add('temperature-alert');
+                } else {
+                    temperatureElement.classList.remove('temperature-alert');
+                }
+                
+                document.getElementById('lastUpdate').textContent = new Date(data.lastUpdate).toLocaleTimeString();
+                
+                this.addLog(`Sensor update: ${data.temperature.toFixed(1)}°C, ${data.humidity.toFixed(1)}%`);
+            }
+
+            updateMotorStatus(state) {
+                const motorIndicator = document.getElementById('motorIndicator');
+                const motorStatus = document.getElementById('motorStatus');
+                const pumpStatus = document.getElementById('pumpStatus');
+                const manualMotorLabel = document.getElementById('manualMotorLabel');
+                
+                if (state === 'ON') {
+                    motorIndicator.className = 'motor-indicator motor-on';
+                    motorStatus.textContent = 'Motor ON';
+                    pumpStatus.textContent = 'ON';
+                    manualMotorLabel.textContent = 'ON';
+                } else {
+                    motorIndicator.className = 'motor-indicator motor-off';
+                    motorStatus.textContent = 'Motor OFF';
+                    pumpStatus.textContent = 'OFF';
+                    manualMotorLabel.textContent = 'OFF';
+                }
+                
+                // Update manual motor switch without triggering event
+                this.motorSwitch.removeEventListener('change', this.handleMotorChange);
+                this.motorSwitch.checked = (state === 'ON');
+                this.motorSwitch.addEventListener('change', this.handleMotorChange.bind(this));
+                
+                this.addLog(`Motor ${state}`);
+            }
+
+            updateModeStatus(mode) {
+                document.getElementById('currentMode').textContent = mode;
+                document.getElementById('modeLabel').textContent = mode;
+                
+                // Update mode switch without triggering event
+                this.modeSwitch.removeEventListener('change', this.handleModeChange);
+                this.modeSwitch.checked = (mode === 'MANUAL');
+                this.modeSwitch.addEventListener('change', this.handleModeChange.bind(this));
+                
+                // Enable/disable manual controls
+                if (mode === 'MANUAL') {
+                    this.manualControls.classList.add('enabled');
+                } else {
+                    this.manualControls.classList.remove('enabled');
+                }
+                
+                this.addLog(`Mode changed to ${mode}`);
+            }
+
+            updateSystemState(state) {
+                if (state.temperature !== undefined) {
+                    this.updateSensorData({
+                        temperature: state.temperature,
+                        humidity: state.humidity,
+                        lastUpdate: state.lastUpdate
+                    });
+                }
+                
+                if (state.motorState !== undefined) {
+                    this.updateMotorStatus(state.motorState);
+                }
+                
+                if (state.mode !== undefined) {
+                    this.updateModeStatus(state.mode);
+                }
+            }
+
+            showSMSAlert(message, status) {
+                const widget = this.smsAlertWidget;
+                const title = document.getElementById('smsAlertTitle');
+                const messageElement = document.getElementById('smsAlertMessage');
+                const cooldownElement = document.getElementById('smsCooldown');
+                
+                // Clear any existing timer
+                if (this.cooldownTimer) {
+                    clearInterval(this.cooldownTimer);
+                    this.cooldownTimer = null;
+                }
+                
+                if (status === 'sending') {
+                    title.textContent = 'Sending SMS Alert...';
+                    messageElement.textContent = message;
+                    cooldownElement.style.display = 'none';
+                    widget.classList.add('show');
+                    
+                } else if (status === 'sent') {
+                    title.textContent = 'SMS Alert Sent!';
+                    messageElement.textContent = message;
+                    cooldownElement.style.display = 'flex';
+                    widget.classList.add('show');
+                    
+                    // Start cooldown timer (30 seconds)
+                    this.startCooldownTimer(30);
+                    
+                } else if (status === 'failed') {
+                    title.textContent = 'SMS Alert Failed';
+                    messageElement.textContent = message;
+                    cooldownElement.style.display = 'none';
+                    widget.classList.add('show');
+                    
+                    // Hide after 5 seconds
+                    setTimeout(() => {
+                        widget.classList.remove('show');
+                    }, 5000);
+                }
+            }
+
+            startCooldownTimer(seconds) {
+                const timerElement = document.getElementById('cooldownTimer');
+                const progressElement = document.getElementById('cooldownProgress');
+                const widget = this.smsAlertWidget;
+                
+                let remainingSeconds = seconds;
+                progressElement.style.width = '100%';
+                
+                this.cooldownTimer = setInterval(() => {
+                    remainingSeconds--;
+                    timerElement.textContent = `${remainingSeconds}s`;
+                    
+                    // Update progress bar
+                    const progress = (remainingSeconds / seconds) * 100;
+                    progressElement.style.width = `${progress}%`;
+                    
+                    if (remainingSeconds <= 0) {
+                        clearInterval(this.cooldownTimer);
+                        this.cooldownTimer = null;
+                        widget.classList.remove('show');
+                    }
+                }, 1000);
+            }
+
+            setupEventListeners() {
+                this.modeSwitch.addEventListener('change', this.handleModeChange.bind(this));
+                this.motorSwitch.addEventListener('change', this.handleMotorChange.bind(this));
+            }
+
+            handleModeChange() {
+                const mode = this.modeSwitch.checked ? 'MANUAL' : 'AUTO';
+                
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'mode_control',
+                        mode: mode
+                    }));
+                }
+            }
+
+            handleMotorChange() {
+                const state = this.motorSwitch.checked ? 'ON' : 'OFF';
+                
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'motor_control',
+                        state: state
+                    }));
+                }
+            }
+
+            addLog(message) {
+                const logsContainer = document.getElementById('systemLogs');
+                const logEntry = document.createElement('div');
+                logEntry.className = 'log-entry';
+                
+                const time = new Date().toLocaleTimeString();
+                logEntry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+                
+                logsContainer.appendChild(logEntry);
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+                
+                // Keep only last 50 log entries
+                while (logsContainer.children.length > 50) {
+                    logsContainer.removeChild(logsContainer.firstChild);
+                }
+            }
+        }
+
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new IrrigationDashboard();
+        });
+    </script>
+</body>
+</html>

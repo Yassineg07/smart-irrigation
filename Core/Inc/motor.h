@@ -6,8 +6,7 @@
 // Motor states
 typedef enum {
     MOTOR_STOP = 0,
-    MOTOR_FORWARD,
-    MOTOR_REVERSE
+    MOTOR_FORWARD
 } Motor_State;
 
 // Function prototypes

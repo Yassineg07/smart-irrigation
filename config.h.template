@@ -1,0 +1,43 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+/**
+ * @file config.h
+ * @brief Configuration file for Smart Irrigation System
+ * 
+ * Copy this file to your project and update with your specific settings.
+ * This file should be added to .gitignore to avoid committing sensitive information.
+ */
+
+/* WiFi Configuration */
+#define WIFI_SSID                   "Your_WiFi_Network_Name"
+#define WIFI_PASSWORD               "Your_WiFi_Password"
+
+/* MQTT Broker Configuration */
+#define MQTT_BROKER_IP              "192.168.1.100"  // Replace with your MQTT broker IP
+#define MQTT_BROKER_PORT            1883
+#define MQTT_CLIENT_ID              "STM32_Irrigation_System"
+
+/* MQTT Topics */
+#define MQTT_TOPIC_SENSOR_DATA      "irrigation/sensor_data"
+#define MQTT_TOPIC_MOTOR_STATUS     "irrigation/motor_status"
+#define MQTT_TOPIC_MODE_STATUS      "irrigation/mode_status"
+#define MQTT_TOPIC_SYSTEM_STATUS    "irrigation/system_status"
+#define MQTT_TOPIC_MODE             "irrigation/mode"
+#define MQTT_TOPIC_MOTOR            "irrigation/motor"
+#define MQTT_TOPIC_STATUS_REQUEST   "irrigation/status_request"
+#define MQTT_TOPIC_SMS_ALERT        "irrigation/sms_alert"
+
+/* System Configuration */
+#define TEMPERATURE_THRESHOLD       30.0f  // Temperature threshold in Celsius
+#define SENSOR_UPDATE_INTERVAL      2000   // Sensor update interval in milliseconds
+
+/* SMS Configuration (Optional - only if using SIM800L) */
+#define SMS_PHONE_NUMBER            "+1234567890"  // Replace with your phone number
+#define SMS_COOLDOWN_TIME           300000  // 5 minutes in milliseconds (prevent spam)
+
+/* Debug Configuration */
+#define DEBUG_ENABLE                1      // Set to 0 to disable debug output
+#define DEBUG_UART                  huart3 // UART for debug messages (USB CDC)
+
+#endif /* CONFIG_H */

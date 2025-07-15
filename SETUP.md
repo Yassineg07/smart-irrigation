@@ -1,75 +1,119 @@
-# Project Setup and Installation
+# Smart Irrigation System - Quick Setup Guide
 
-This document provides detailed instructions for setting up and installing the Smart Agriculture System.
+## Prerequisites
+- STM32CubeIDE installed
+- Node.js (v12.0 or higher) installed
+- MQTT broker (Mosquitto recommended)
+- Hardware components assembled
+
+## Step 1: Configure Network Settings
+
+### Option A: Using Configuration Template
+1. Copy `config.h.template` to `Core/Inc/config.h`
+2. Edit `config.h` with your settings:
+   - WiFi SSID and password
+   - MQTT broker IP address
+   - Phone number (if using SMS alerts)
+
+### Option B: Direct Configuration
+Edit the following defines in `Core/Src/main.c`:
+```c
+#define WIFI_SSID                   "Your_WiFi_Network"
+#define WIFI_PASSWORD               "Your_WiFi_Password"
+#define MQTT_BROKER_IP              "192.168.1.100"
+#define SMS_PHONE_NUMBER            "+1234567890"
+```
+
+## Step 2: Setup MQTT Broker
+
+### Ubuntu/Debian:
+```bash
+sudo apt update
+sudo apt install mosquitto mosquitto-clients
+sudo systemctl start mosquitto
+sudo systemctl enable mosquitto
+```
+
+### Windows:
+Download and install from: https://mosquitto.org/download/
+
+### Docker:
+```bash
+docker run -it -p 1883:1883 eclipse-mosquitto
+```
+
+## Step 3: Configure Dashboard
+
+### Automatic Setup:
+```bash
+cd websocket
+npm install
+npm run setup
+```
+
+### Manual Setup:
+1. Edit `server.js` and replace `YOUR_MQTT_BROKER_IP` with your broker IP
+2. Save the file
+
+## Step 4: Build and Flash STM32
+
+1. Open project in STM32CubeIDE
+2. Build the project (Ctrl+B)
+3. Flash to STM32F407 (F11)
+4. Monitor debug output via USB CDC
+
+## Step 5: Start Dashboard
+
+### Windows:
+Double-click `start_dashboard.bat`
+
+### Linux/Mac:
+```bash
+cd websocket
+npm start
+```
+
+## Step 6: Access Dashboard
+
+Open your web browser and navigate to:
+`http://[YOUR_BROKER_IP]:3000`
 
 ## Hardware Connections
 
-### DHT11 Temperature & Humidity Sensor
-- Connect the VCC pin to 3.3V
-- Connect the GND pin to ground
-- Connect the DATA pin to the designated GPIO pin (PA10 in the default configuration)
-
-### ESP8266 WiFi Module
-- Connect VCC to 3.3V
-- Connect GND to ground
-- Connect TX to RX of USART2 (PA3)
-- Connect RX to TX of USART2 (PA2)
-- Connect CH_PD (or EN) to 3.3V
-
-### SIM800L GSM Module
-- Connect VCC to regulated 4.0-4.2V (important: do not connect directly to 5V)
-- Connect GND to ground
-- Connect TX to RX of UART4 (PA1)
-- Connect RX to TX of UART4 (PA0)
-
-### Motor Driver
-- Connect IN1 to PB10
-- Connect IN2 to PB11
-- Connect motor power supply according to your specific motor driver requirements
-
-## Firmware Setup
-
-1. Clone this repository
-2. Open the project in STM32CubeIDE
-3. Configure your WiFi credentials, ThingSpeak API key, and phone number in `main.c`
-4. Compile and flash to your STM32F407VG board
-
-## ThingSpeak Configuration
-
-1. Create a free ThingSpeak account at [thingspeak.com](https://thingspeak.com/)
-2. Create a new channel with the following fields:
-   - Field 1: Temperature (°C)
-   - Field 2: Humidity (%)
-3. Copy your Write API Key and replace the placeholder in `main.c`
-
-## Testing and Verification
-
-After setup, you should:
-1. See serial output on UART4 (115200 baud) with sensor readings and status updates
-2. Observe data appearing in your ThingSpeak channel
-3. Receive SMS alerts when temperature or humidity exceeds thresholds
-4. See the motor activate when humidity falls below the threshold
+| Component | STM32 Pin | Notes |
+|-----------|-----------|-------|
+| DHT11 Data | PA8 | 3.3V/5V compatible |
+| Motor Control | PD15 | Use relay for high current |
+| ESP8266 TX | PA3 (UART2_RX) | 3.3V logic level |
+| ESP8266 RX | PA2 (UART2_TX) | 3.3V logic level |
+| SIM800L TX | PA1 (UART4_RX) | Optional, for SMS |
+| SIM800L RX | PA0 (UART4_TX) | Optional, for SMS |
 
 ## Troubleshooting
 
-Common issues and solutions:
+### STM32 Not Connecting to WiFi:
+- Check ESP8266 power supply (3.3V)
+- Verify WiFi credentials
+- Ensure strong WiFi signal
 
-1. **No WiFi connection**:
-   - Check power supply to ESP8266
-   - Verify UART connections
-   - Confirm WiFi credentials are correct
-   
-2. **No data uploads to ThingSpeak**:
-   - Verify internet connectivity
-   - Check API key correctness
-   - Ensure proper ThingSpeak channel configuration
-   
-3. **No SMS alerts**:
-   - Verify SIM card is active and has credit
-   - Check power supply to SIM800L
-   - Confirm network registration status
+### Dashboard Not Loading:
+- Check MQTT broker is running
+- Verify IP address configuration
+- Check firewall settings
 
-4. **Motor not activating**:
-   - Check connections to motor driver
-   - Verify power supply to motor
-   - Confirm threshold settings in `main.c`
+### No Sensor Data:
+- Verify DHT11 connections
+- Check sensor power supply
+- Allow 2-second warm-up time
+
+## Support
+
+For issues, check:
+1. Serial debug output from STM32
+2. MQTT broker logs
+3. Browser developer console
+4. Project GitHub issues
+
+## Security Note
+
+Never commit sensitive information like WiFi passwords or phone numbers to version control. Use the `config.h` file (which is in `.gitignore`) for sensitive data.

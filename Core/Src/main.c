@@ -18,16 +18,15 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
 #include "dht11.h"
+#include "motor.h"
+#include "usbd_cdc_if.h"
 #include "esp8266.h"
 #include "sim800l.h"
-#include "motor.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,6 +36,34 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/* WiFi Configuration */
+#define WIFI_SSID                   "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD               "YOUR_WIFI_PASSWORD"
+
+/* MQTT Configuration */
+#define MQTT_BROKER_IP              "YOUR_MQTT_BROKER_IP"
+#define MQTT_BROKER_PORT            1883
+#define MQTT_CLIENT_ID              "STM32_Irrigation_System"
+
+/* MQTT Topics */
+#define MQTT_TOPIC_SENSOR_DATA      "irrigation/sensor_data"
+#define MQTT_TOPIC_MOTOR_STATUS     "irrigation/motor_status"
+#define MQTT_TOPIC_MODE_STATUS      "irrigation/mode_status"
+#define MQTT_TOPIC_SYSTEM_STATUS    "irrigation/system_status"
+#define MQTT_TOPIC_MODE_CONTROL     "irrigation/mode"
+#define MQTT_TOPIC_MOTOR_CONTROL    "irrigation/motor"
+#define MQTT_TOPIC_STATUS_REQUEST   "irrigation/status_request"
+#define MQTT_TOPIC_SMS_ALERT        "irrigation/sms_alert"
+
+/* System Configuration */
+#define TEMPERATURE_THRESHOLD       33.0f
+#define HUMIDITY_THRESHOLD_HIGH     80.0f  // Turn motor ON when humidity >= 80%
+#define HUMIDITY_THRESHOLD_LOW      60.0f  // Turn motor OFF when humidity <= 60%
+#define DATA_PUBLISH_INTERVAL       2000   // 2 seconds in milliseconds
+
+/* SMS Configuration */
+#define SMS_PHONE_NUMBER            "+1234567890"  // Replace with your phone number
+#define SMS_COOLDOWN_TIME           30000  // 5 minutes in milliseconds (prevent spam)
 
 /* USER CODE END PD */
 
@@ -50,42 +77,56 @@ TIM_HandleTypeDef htim6;
 
 UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_uart4_rx;
+DMA_HandleTypeDef hdma_uart4_tx;
+DMA_HandleTypeDef hdma_usart2_rx;
+DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
-// WiFi credentials
-#define WIFI_SSID           "YOUR_WIFI_SSID"
-#define WIFI_PASSWORD       "YOUR_WIFI_PASSWORD"
+// Operation modes
+typedef enum {
+    MODE_AUTO = 0,
+    MODE_MANUAL = 1
+} SystemMode_t;
 
-// ThingSpeak settings
-#define THINGSPEAK_API_KEY  "YOUR_THINGSPEAK_API_KEY"
-#define UPLOAD_INTERVAL     15000  // Upload data every 15 seconds
+// System state variables
+static SystemMode_t system_mode = MODE_AUTO;
+static bool motor_manual_state = false;
+static bool mqtt_connected = false;
+static bool sim800l_initialized = false;
 
-// SMS settings
-#define PHONE_NUMBER        "+1234567890"  // Replace with your phone number
-#define TEMP_THRESHOLD      30.0   // Temperature threshold for SMS alert (°C)
-#define HUM_THRESHOLD       80.0   // Humidity threshold for SMS alert (%)
-#define MOTOR_ON_THRESHOLD  40.0   // Soil moisture threshold for motor activation
+// Timing variables
+static uint32_t last_publish_time = 0;
+static uint32_t last_sms_time = 0;
+static bool publish_data_flag = false;
+static bool temperature_alert_sent = false;
 
-// System state
-uint32_t last_upload_time = 0;
-uint32_t last_sms_time = 0;
-bool threshold_exceeded = false;
-bool sms_sent = false;
-#define SMS_COOLDOWN        300000  // 5 minutes cooldown between SMS alerts
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_TIM6_Init(void);
-static void MX_UART4_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_UART4_Init(void);
 /* USER CODE BEGIN PFP */
-void Check_And_Control_Motor(float humidity);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static char status_message[100];
+static bool status_update_pending = false;  // Flag for deferred status updates
+
+// Function prototypes
+void PublishSensorData(float temperature, float humidity);
+void PublishMotorStatus(const char* status);
+void PublishModeStatus(const char* mode);
+void PublishSystemStatus(float temperature, float humidity, const char* motor_status, const char* mode);
+void HandleAutoMode(float temperature, float humidity);
+void HandleManualMode(void);
+void CheckTemperatureAlert(float temperature);
 
 /* USER CODE END 0 */
 
@@ -118,63 +159,62 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
+  MX_USB_DEVICE_Init();
   MX_TIM6_Init();
-  MX_UART4_Init();
   MX_USART2_UART_Init();
+  MX_UART4_Init();
   /* USER CODE BEGIN 2 */
   DHT11_Data dht11_data;
   DHT11_Init(&htim6, dht11_GPIO_Port, dht11_Pin);
-  
-  // Initialize ESP8266 WiFi module
-  ESP8266_Init(&huart2);
-  
-  // Initialize SIM800L GSM module
-  SIM800L_Init(&huart4);
-  
-  // Initialize motor control
+  float temperature = 0.0f;
+  float humidity = 0.0f;
   Motor_Init();
-  // Configure ESP8266
-  HAL_Delay(3000); // Give time for modules to boot up
   
-  char buffer[100];  // Initialize ESP8266 - minimizing debug messages to avoid interference
-  ESP8266_Reset();
-  HAL_Delay(2000);  // Extra delay after reset
+  // Initialize SIM800L GSM module with UART4
+  if (SIM800L_Init(&huart4) == SIM800L_OK) {
+    sim800l_initialized = true;
+    
+    // Send initialization SMS
+    char init_sms[160];
+    snprintf(init_sms, sizeof(init_sms), "Smart Irrigation System Initialized. SIM800L connected. Phone: %s", SMS_PHONE_NUMBER);
+    SIM800L_SendSMS(SMS_PHONE_NUMBER, init_sms);
+    
+    // Send message via USB CDC
+    char init_msg[] = "SIM800L GSM Module Initialized - Ready to send SMS alerts\r\n";
+    CDC_Transmit_FS((uint8_t*)init_msg, strlen(init_msg));
+  } else {
+    char error_msg[] = "SIM800L Initialization Failed\r\n";
+    CDC_Transmit_FS((uint8_t*)error_msg, strlen(error_msg));
+  }
   
-  ESP8266_Test();
-  HAL_Delay(500);
+  // Initialize ESP8266 WiFi module with UART2
+  if (ESP8266_Init(&huart2) == ESP8266_OK) {
+    // Connect to WiFi
+    if (ESP8266_ConnectWiFi(WIFI_SSID, WIFI_PASSWORD) == ESP8266_OK) {
+        // Connect to MQTT broker
+        if (ESP8266_ConnectMQTT(MQTT_BROKER_IP, MQTT_BROKER_PORT, MQTT_CLIENT_ID) == ESP8266_OK) {
+          mqtt_connected = true;
+          
+          // Subscribe to control topics
+          ESP8266_SubscribeMQTT(MQTT_TOPIC_MODE_CONTROL);
+          ESP8266_SubscribeMQTT(MQTT_TOPIC_MOTOR_CONTROL);
+          ESP8266_SubscribeMQTT(MQTT_TOPIC_STATUS_REQUEST);
+
+          // Publish initial status
+          PublishSystemStatus(0.0f, 0.0f, "OFF", "AUTO");
+          
+          // Send connection message via USB CDC
+          char init_msg[] = "Smart Irrigation System Initialized - Connected to MQTT\r\n";
+          CDC_Transmit_FS((uint8_t*)init_msg, strlen(init_msg));
+        }
+    }
+  }
   
-  ESP8266_EchoOff();
-  HAL_Delay(500);
-  
-  ESP8266_SetStationMode();
-  HAL_Delay(500);
-    // Connect to WiFi at startup - avoid debug messages on ESP8266 UART
-  ESP8266_ConnectToWiFi(WIFI_SSID, WIFI_PASSWORD);
-  HAL_Delay(2000);  // Give WiFi time to connect
-  
-  // Configure SIM800L
-  HAL_Delay(2000);
-    // Initialize SIM800L with fewer debug messages
-  SIM800L_Test();
-  HAL_Delay(300);
-  
-  SIM800L_EchoOff();
-  HAL_Delay(300);
-  
-  SIM800L_SetSmsTextMode();
-  HAL_Delay(300);
-  
-  // Check network registration
-  SIM800L_CheckNetworkRegistration();
-  HAL_Delay(1000);
-  
-  // Only keep this essential startup message - sent after all modules initialized
-  snprintf(buffer, sizeof(buffer), "Smart Agriculture System Started!\r\n");
-  HAL_UART_Transmit(&huart4, (uint8_t*)buffer, strlen(buffer), 1000);  // Send to UART4 to avoid ESP8266 interference
-  
-  // Store startup time
-  last_upload_time = HAL_GetTick();
+  // Initialize timing
+  last_publish_time = HAL_GetTick();
   last_sms_time = HAL_GetTick();
+  
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -184,99 +224,67 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-      // Variables declaration
-      float temperature = 0.0f;
-      float humidity = 0.0f;
-      char buffer[100];
-      uint32_t current_time = HAL_GetTick();
-      
-      // Read data from DHT11 sensor
-      DHT11_Status dht_status = DHT11_ReadData(&dht11_data);
-      
-      if (dht_status == DHT11_OK) {
-          // Read temperature and humidity when sensor reading is successful
-          temperature = DHT11_GetTemperature(&dht11_data);
-          humidity = DHT11_GetHumidity(&dht11_data);
-          
-          // Display current readings
-          snprintf(buffer, sizeof(buffer), "Temp: %.1f°C, Hum: %.1f%%\r\n",
-                   temperature, humidity);
-          HAL_UART_Transmit(&huart4, (uint8_t*)buffer, strlen(buffer), 1000);
-          
-          // Upload data to ThingSpeak if interval has passed
-          if (current_time - last_upload_time >= UPLOAD_INTERVAL) {
-              // Try to connect and upload data
-              if (ESP8266_ConnectToThingspeak() == ESP8266_OK) {
-                  HAL_Delay(1000);
-                  
-                  ESP8266_Status data_status = ESP8266_SendData(THINGSPEAK_API_KEY, temperature, humidity);
-                  HAL_Delay(1000);
-                  ESP8266_CloseConnection();
-                  
-                  // Confirm successful upload
-                  if (data_status == ESP8266_OK) {
-                      snprintf(buffer, sizeof(buffer), "Data uploaded successfully!\r\n");
-                      HAL_UART_Transmit(&huart4, (uint8_t*)buffer, strlen(buffer), 1000);
-                  }
-              } else {
-                  // Reconnect to WiFi if connection failed
-                  ESP8266_ConnectToWiFi(WIFI_SSID, WIFI_PASSWORD);
-              }
-              
-              last_upload_time = current_time;
-          }
-          
-          // Check if temperature or humidity exceeds thresholds
-          if (temperature > TEMP_THRESHOLD || humidity > HUM_THRESHOLD) {
-              threshold_exceeded = true;
-              
-              // Send SMS alert if cooldown period has elapsed
-              if (!sms_sent || (current_time - last_sms_time >= SMS_COOLDOWN)) {
-                  if (SIM800L_CheckNetworkRegistration() == SIM800L_OK) {
-                      // Format and send SMS alert
-                      char sms_buffer[200];
-                      snprintf(sms_buffer, sizeof(sms_buffer), 
-                               "ALERT: Temperature: %.1f°C, Humidity: %.1f%%\r\n"
-                               "Threshold exceeded! Action may be required.\r\n"
-                               "Smart Agriculture System", 
-                               temperature, humidity);
-                      
-                      SIM800L_Status sms_status = SIM800L_SendSMS(PHONE_NUMBER, sms_buffer);
-                      
-                      if (sms_status == SIM800L_OK) {
-                          sms_sent = true;
-                          last_sms_time = current_time;
-                          
-                          HAL_Delay(500);
-                          snprintf(buffer, sizeof(buffer), "SMS alert sent (%.1f°C, %.1f%%)\r\n", 
-                                  temperature, humidity);
-                          HAL_UART_Transmit(&huart4, (uint8_t*)buffer, strlen(buffer), 1000);
-                      }
-                  }
-              }
-          } else {
-              // Conditions have returned to normal
-              if (threshold_exceeded) {
-                  snprintf(buffer, sizeof(buffer), "Conditions normal (%.1f°C, %.1f%%)\r\n",
-                          temperature, humidity);
-                  HAL_UART_Transmit(&huart4, (uint8_t*)buffer, strlen(buffer), 1000);
-              }
-              
-              threshold_exceeded = false;
-              sms_sent = false;  // Reset SMS flag when conditions return to normal
-          }
-          
-          // Control motor based on humidity
-          Check_And_Control_Motor(humidity);
-      } else {
-          // Handle DHT11 sensor reading error
-          snprintf(buffer, sizeof(buffer), "DHT11 Error: %s\r\n",
-                   dht_status == DHT11_ERROR_CHECKSUM ? "Checksum Error" : "No Response");
-          HAL_UART_Transmit(&huart4, (uint8_t*)buffer, strlen(buffer), 1000);
-      }
-      
-      // Delay before next reading
-      HAL_Delay(2000);
+    uint32_t current_time = HAL_GetTick();
+    
+    // Check if it's time to read sensor and publish data (every 2 seconds)
+    if (current_time - last_publish_time >= DATA_PUBLISH_INTERVAL) {
+        publish_data_flag = true;
+        last_publish_time = current_time;
+    }
+    
+    // Read DHT11 sensor data and publish every 2 seconds
+    if (publish_data_flag) {
+        DHT11_Status dht_status = DHT11_ReadData(&dht11_data);
+        char buffer[150];
+        
+        if (dht_status == DHT11_OK) {
+            temperature = DHT11_GetTemperature(&dht11_data);
+            humidity = DHT11_GetHumidity(&dht11_data);
+            snprintf(buffer, sizeof(buffer), "Temp: %.1f°C, Hum: %.1f%% | Mode: %s | Motor: %s\r\n", 
+                     temperature, humidity, 
+                     (system_mode == MODE_AUTO) ? "AUTO" : "MANUAL",
+                     (Motor_GetState() == MOTOR_FORWARD) ? "ON" : "OFF");
+            
+            // Publish sensor data to MQTT
+            if (mqtt_connected) {
+                PublishSensorData(temperature, humidity);
+            }
+        } else {
+            snprintf(buffer, sizeof(buffer), "DHT11 Error: %s | Mode: %s | Motor: %s\r\n",
+                     (dht_status == DHT11_ERROR_CHECKSUM) ? "Checksum Error" : "No Response",
+                     (system_mode == MODE_AUTO) ? "AUTO" : "MANUAL",
+                     (Motor_GetState() == MOTOR_FORWARD) ? "ON" : "OFF");
+        }
+        CDC_Transmit_FS((uint8_t*)buffer, strlen(buffer));
+        
+        publish_data_flag = false;
+    }
+
+    // Control logic based on current mode (uses last known temperature and humidity)
+    if (system_mode == MODE_AUTO) {
+        HandleAutoMode(temperature, humidity);
+    } else {
+        HandleManualMode();
+    }
+    
+    // Check for temperature alert (33°C)
+    CheckTemperatureAlert(temperature);
+
+    // Process ESP8266 MQTT data
+    ESP8266_ProcessDMAData();
+    
+    // Process SIM800L data
+    if (sim800l_initialized) {
+        SIM800L_ProcessDMAData();
+    }
+
+    // Handle deferred status updates (avoid sending from interrupt context)
+    if (status_update_pending) {
+        status_update_pending = false;
+        const char* motor_status = (Motor_GetState() == MOTOR_FORWARD) ? "ON" : "OFF";
+        const char* mode_status = (system_mode == MODE_AUTO) ? "AUTO" : "MANUAL";
+        PublishSystemStatus(temperature, humidity, motor_status, mode_status);
+    }
   }
   /* USER CODE END 3 */
 }
@@ -303,9 +311,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 84;
+  RCC_OscInitStruct.PLL.PLLN = 168;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -316,7 +324,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
@@ -380,7 +388,7 @@ static void MX_UART4_Init(void)
 
   /* USER CODE END UART4_Init 1 */
   huart4.Instance = UART4;
-  huart4.Init.BaudRate = 115200;
+  huart4.Init.BaudRate = 9600;
   huart4.Init.WordLength = UART_WORDLENGTH_8B;
   huart4.Init.StopBits = UART_STOPBITS_1;
   huart4.Init.Parity = UART_PARITY_NONE;
@@ -431,6 +439,31 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
+  /* DMA1_Stream4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
+  /* DMA1_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -445,26 +478,22 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, in1_Pin|in2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(motor_GPIO_Port, motor_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(dht11_GPIO_Port, dht11_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pins : in1_Pin in2_Pin */
-  GPIO_InitStruct.Pin = in1_Pin|in2_Pin;
+  /*Configure GPIO pin : motor_Pin */
+  GPIO_InitStruct.Pin = motor_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(motor_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : dht11_Pin */
   GPIO_InitStruct.Pin = dht11_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(dht11_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -474,42 +503,234 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 /**
- * @brief Check humidity level and control the motor accordingly
- * @param humidity: Current humidity level (as a simplified soil moisture indicator)
- */
-void Check_And_Control_Motor(float humidity) {
-    char buffer[100];
+  * @brief  MQTT message received callback
+  * @param  topic: MQTT topic
+  * @param  message: MQTT message
+  * @retval None
+  */
+void ESP8266_OnMQTTMessageReceived(const char* topic, const char* message)
+{
+    if (strcmp(topic, MQTT_TOPIC_MODE_CONTROL) == 0) {
+        // Handle mode control: AUTO or MANUAL
+        if (strcmp(message, "AUTO") == 0) {
+            system_mode = MODE_AUTO;
+            PublishModeStatus("AUTO");
+            
+            char msg[] = "Mode changed to AUTO\r\n";
+            CDC_Transmit_FS((uint8_t*)msg, strlen(msg));
+            
+        } else if (strcmp(message, "MANUAL") == 0) {
+            system_mode = MODE_MANUAL;
+            PublishModeStatus("MANUAL");
+            
+            char msg[] = "Mode changed to MANUAL\r\n";
+            CDC_Transmit_FS((uint8_t*)msg, strlen(msg));
+        }
+        
+    } else if (strcmp(topic, MQTT_TOPIC_MOTOR_CONTROL) == 0) {
+        // Handle manual motor control (only in manual mode)
+        if (system_mode == MODE_MANUAL) {
+            if (strcmp(message, "ON") == 0) {
+                motor_manual_state = true;
+                Motor_SetState(MOTOR_FORWARD);
+                PublishMotorStatus("ON");
+                
+                char msg[] = "Manual motor ON\r\n";
+                CDC_Transmit_FS((uint8_t*)msg, strlen(msg));
+                
+            } else if (strcmp(message, "OFF") == 0) {
+                motor_manual_state = false;
+                Motor_SetState(MOTOR_STOP);
+                PublishMotorStatus("OFF");
+                
+                char msg[] = "Manual motor OFF\r\n";
+                CDC_Transmit_FS((uint8_t*)msg, strlen(msg));
+            }
+        }
+        
+    } else if (strcmp(topic, MQTT_TOPIC_STATUS_REQUEST) == 0) {
+        // Handle status request - set flag to publish current status
+        status_update_pending = true;
+    }
+}
+
+/**
+  * @brief  Publish sensor data to MQTT
+  * @param  temperature: Current temperature
+  * @param  humidity: Current humidity
+  * @retval None
+  */
+void PublishSensorData(float temperature, float humidity)
+{
+    if (!mqtt_connected) return;
+    
+    snprintf(status_message, sizeof(status_message), 
+             "T%.1fH%.1f", 
+             temperature, humidity);
+    ESP8266_PublishMQTT(MQTT_TOPIC_SENSOR_DATA, status_message);
+}
+
+/**
+  * @brief  Publish motor status to MQTT
+  * @param  status: Motor status string ("ON" or "OFF")
+  * @retval None
+  */
+void PublishMotorStatus(const char* status)
+{
+    if (!mqtt_connected) return;
+    ESP8266_PublishMQTT(MQTT_TOPIC_MOTOR_STATUS, status);
+}
+
+/**
+  * @brief  Publish mode status to MQTT
+  * @param  mode: Mode string ("AUTO" or "MANUAL")
+  * @retval None
+  */
+void PublishModeStatus(const char* mode)
+{
+    if (!mqtt_connected) return;
+    ESP8266_PublishMQTT(MQTT_TOPIC_MODE_STATUS, mode);
+}
+
+/**
+  * @brief  Publish complete system status to MQTT
+  * @param  temperature: Current temperature
+  * @param  humidity: Current humidity
+  * @param  motor_status: Motor status string
+  * @param  mode: Mode string
+  * @retval None
+  */
+void PublishSystemStatus(float temperature, float humidity, const char* motor_status, const char* mode)
+{
+    if (!mqtt_connected) return;
+    
+    snprintf(status_message, sizeof(status_message), 
+             "T%.1fH%.1fM%sD%s", 
+             temperature, humidity, motor_status, mode);
+    ESP8266_PublishMQTT(MQTT_TOPIC_SYSTEM_STATUS, status_message);
+}
+
+/**
+  * @brief  Handle automatic mode operation
+  * @param  temperature: Current temperature
+  * @param  humidity: Current humidity
+  * @retval None
+  */
+void HandleAutoMode(float temperature, float humidity)
+{
     static uint32_t motor_start_time = 0;
     static uint32_t total_runtime = 0;
     uint32_t current_time = HAL_GetTick();
     
-    // Control motor based on humidity threshold
-    if (humidity < MOTOR_ON_THRESHOLD) {
-        // Start motor to pump water if it's not already running
-        if (Motor_GetState() != MOTOR_FORWARD) {
-            // Send motor status to UART4
-            snprintf(buffer, sizeof(buffer), "Motor ON (humidity: %.1f%%)\r\n", humidity);
-            HAL_UART_Transmit(&huart4, (uint8_t*)buffer, strlen(buffer), 1000);
-            
+    Motor_State current_motor_state = Motor_GetState();
+    
+    // Control motor based on humidity thresholds
+    if (humidity >= HUMIDITY_THRESHOLD_HIGH) {
+        // Start motor if it's not already running
+        if (current_motor_state != MOTOR_FORWARD) {
             Motor_SetState(MOTOR_FORWARD);
             motor_start_time = current_time;
+            PublishMotorStatus("ON");
+            
+            char buffer[120];
+            snprintf(buffer, sizeof(buffer), "AUTO: Motor ON (humidity: %.1f%% >= %.1f%%)\r\n", 
+                     humidity, HUMIDITY_THRESHOLD_HIGH);
+            CDC_Transmit_FS((uint8_t*)buffer, strlen(buffer));
         }
-    } else {
+    } else if (humidity <= HUMIDITY_THRESHOLD_LOW) {
         // Stop motor if it's running
-        if (Motor_GetState() != MOTOR_STOP) {
-            // Calculate runtime
+        if (current_motor_state != MOTOR_STOP) {
             uint32_t runtime = current_time - motor_start_time;
             total_runtime += runtime;
             
-            // Combine messages to reduce UART operations
-            snprintf(buffer, sizeof(buffer), "Motor OFF (humidity: %.1f%%), Run: %lu ms, Total: %lu ms\r\n", 
-                    humidity, runtime, total_runtime);
-            HAL_UART_Transmit(&huart4, (uint8_t*)buffer, strlen(buffer), 1000);
-            
             Motor_SetState(MOTOR_STOP);
+            PublishMotorStatus("OFF");
+            
+            char buffer[140];
+            snprintf(buffer, sizeof(buffer), 
+                     "AUTO: Motor OFF (humidity: %.1f%% <= %.1f%%) Runtime: %lu ms, Total: %lu ms\r\n",
+                     humidity, HUMIDITY_THRESHOLD_LOW, runtime, total_runtime);
+            CDC_Transmit_FS((uint8_t*)buffer, strlen(buffer));
         }
     }
+    // If humidity is between thresholds (60% < humidity < 80%), maintain current state
 }
+
+/**
+  * @brief  Handle manual mode operation
+  * @retval None
+  */
+void HandleManualMode(void)
+{
+    // In manual mode, motor state is controlled by motor_manual_state variable
+    // which is set via MQTT commands
+    Motor_State desired_state = motor_manual_state ? MOTOR_FORWARD : MOTOR_STOP;
+    Motor_State current_state = Motor_GetState();
+    
+    if (current_state != desired_state) {
+        Motor_SetState(desired_state);
+        const char* status = (desired_state == MOTOR_FORWARD) ? "ON" : "OFF";
+        PublishMotorStatus(status);
+    }
+}
+
+/**
+  * @brief  Check for temperature alert and send SMS if needed
+  * @param  temperature: Current temperature
+  * @retval None
+  */
+void CheckTemperatureAlert(float temperature)
+{
+    uint32_t current_time = HAL_GetTick();
+    
+    // Check if temperature reaches the threashold value and we haven't sent an alert recently
+    if (temperature >= TEMPERATURE_THRESHOLD && !temperature_alert_sent) {
+        // Check cooldown period (5 minutes)
+        if (current_time - last_sms_time >= SMS_COOLDOWN_TIME) {
+            if (sim800l_initialized) {
+                char sms_message[160];
+                snprintf(sms_message, sizeof(sms_message), 
+                         "ALERT: Temperature reached %.1f°C! System status: Motor %s, Mode: %s",
+                         temperature,
+                         (Motor_GetState() == MOTOR_FORWARD) ? "ON" : "OFF",
+                         (system_mode == MODE_AUTO) ? "AUTO" : "MANUAL");
+                
+                // Publish SMS sending status
+                if (mqtt_connected) {
+                    ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "SENDING:Temperature alert SMS");
+                }
+                
+                SIM800L_Status_t sms_status = SIM800L_SendSMS(SMS_PHONE_NUMBER, sms_message);
+                if (sms_status == SIM800L_OK) {
+                    temperature_alert_sent = true;
+                    last_sms_time = current_time;
+                    
+                    // Publish SMS sent status
+                    if (mqtt_connected) {
+                        ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "SENT:Temperature alert SMS sent successfully");
+                    }
+                    
+                    char log_msg[] = "Temperature Alert SMS sent successfully\r\n";
+                    CDC_Transmit_FS((uint8_t*)log_msg, strlen(log_msg));
+                } else {
+                    // Publish SMS failed status
+                    if (mqtt_connected) {
+                        ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "FAILED:Failed to send temperature alert SMS");
+                    }
+                    
+                    char error_msg[] = "Failed to send Temperature Alert SMS\r\n";
+                    CDC_Transmit_FS((uint8_t*)error_msg, strlen(error_msg));
+                }
+            }
+        }
+    }
+    
+    // Reset alert flag if temperature drops below threshold
+    if (temperature < TEMPERATURE_THRESHOLD - 2.0f) { // 2°C hysteresis
+        temperature_alert_sent = false;
+    }
+}
+
 /* USER CODE END 4 */
 
 /**
