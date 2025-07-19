@@ -2,8 +2,8 @@
 
 IoT-based automatic irrigation system using STM32F407, ESP8266 WiFi, and environmental sensors with web dashboard control.
 
-![alt text](<Screenshot 2025-07-19 210419.png>)
-![alt text](<Screenshot 2025-07-19 231054.png>)
+![Screenshot 1](<Screenshot 2025-07-19 210419.png>)
+![Screenshot 2](<Screenshot 2025-07-19 231054.png>)
 
 ## Features
 
@@ -369,6 +369,6 @@ For issues or questions:
 - Check troubleshooting section above
 - Review debug output via USB CDC
 - Create issue on GitHub repository
-Or contact me [Yassineg07](mailto:gharbiyasine040@gmail.com).
+or contact me [Yassineg07](mailto:gharbiyasine040@gmail.com).
 
 
