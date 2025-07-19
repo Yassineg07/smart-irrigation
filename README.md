@@ -159,6 +159,11 @@ docker run -d -p 1883:1883 --name mosquitto eclipse-mosquitto
 
 ### 3. Web Dashboard Setup
 
+> [!IMPORTANT]
+> **Windows users:** Double-click `start_dashboard.bat` for easy setup!
+
+**Other Setup Methods:**
+
 **Option A: Automated Setup (Recommended)**
 ```bash
 cd websocket
@@ -174,8 +179,6 @@ npm install
 # Edit server.js and replace YOUR_MQTT_BROKER_IP with your broker IP
 npm start
 ```
-
-**Windows users:** Double-click `start_dashboard.bat`
 
 ### 4. STM32 Programming
 1. Open project in STM32CubeIDE
@@ -358,7 +361,7 @@ Planned upgrades and features:
 
 ## License
 
-MIT License - Open source project for educational and commercial use.
+MIT [LICENSE](LICENSE) - Open source project for educational and commercial use.
 
 ## Support
 
@@ -366,6 +369,6 @@ For issues or questions:
 - Check troubleshooting section above
 - Review debug output via USB CDC
 - Create issue on GitHub repository
-
+Or contact me [Yassineg07](mailto:gharbiyasine040@gmail.com).
 
 
