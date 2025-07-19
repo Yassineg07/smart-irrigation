@@ -26,7 +26,7 @@
 #include "motor.h"
 #include "usbd_cdc_if.h"
 #include "esp8266.h"
-#include "sim800l.h"
+#include "sim800l.h"  // SMS module for temperature alerts
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,13 +57,13 @@
 
 /* System Configuration */
 #define TEMPERATURE_THRESHOLD       33.0f
-#define HUMIDITY_THRESHOLD_HIGH     80.0f  // Turn motor ON when humidity >= 80%
-#define HUMIDITY_THRESHOLD_LOW      60.0f  // Turn motor OFF when humidity <= 60%
+#define HUMIDITY_THRESHOLD_LOW      50.0f  // Turn motor ON when humidity <= 50%
+#define HUMIDITY_THRESHOLD_HIGH     80.0f  // Turn motor OFF when humidity >= 80%
 #define DATA_PUBLISH_INTERVAL       2000   // 2 seconds in milliseconds
 
 /* SMS Configuration */
-#define SMS_PHONE_NUMBER            "+1234567890"  // Replace with your phone number
-#define SMS_COOLDOWN_TIME           30000  // 5 minutes in milliseconds (prevent spam)
+#define SMS_PHONE_NUMBER            "+YOUR_PHONE_NUMBER"  // Replace with your phone number
+#define SMS_COOLDOWN_TIME           300000  // 5 minutes in milliseconds (prevent spam)
 
 /* USER CODE END PD */
 
@@ -100,6 +100,11 @@ static uint32_t last_publish_time = 0;
 static uint32_t last_sms_time = 0;
 static bool publish_data_flag = false;
 static bool temperature_alert_sent = false;
+
+// Temperature tracking for reliable alert detection
+static float last_valid_temperature = 0.0f;
+static uint32_t high_temp_start_time = 0;
+static bool high_temp_detected = false;
 
 /* USER CODE END PV */
 
@@ -165,7 +170,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_UART4_Init();
   /* USER CODE BEGIN 2 */
-  DHT11_Data dht11_data;
+  DHT11_Data_t dht11_data;
   DHT11_Init(&htim6, dht11_GPIO_Port, dht11_Pin);
   float temperature = 0.0f;
   float humidity = 0.0f;
@@ -181,7 +186,7 @@ int main(void)
     SIM800L_SendSMS(SMS_PHONE_NUMBER, init_sms);
     
     // Send message via USB CDC
-    char init_msg[] = "SIM800L GSM Module Initialized - Ready to send SMS alerts\r\n";
+    char init_msg[] = "SIM800L GSM Module Initialized - Temperature alerts enabled\r\n";
     CDC_Transmit_FS((uint8_t*)init_msg, strlen(init_msg));
   } else {
     char error_msg[] = "SIM800L Initialization Failed\r\n";
@@ -213,7 +218,9 @@ int main(void)
   
   // Initialize timing
   last_publish_time = HAL_GetTick();
-  last_sms_time = HAL_GetTick();
+  last_sms_time = 0;  // Allow immediate first SMS alert
+  temperature_alert_sent = false;
+  high_temp_detected = false;
   
   /* USER CODE END 2 */
 
@@ -234,12 +241,14 @@ int main(void)
     
     // Read DHT11 sensor data and publish every 2 seconds
     if (publish_data_flag) {
-        DHT11_Status dht_status = DHT11_ReadData(&dht11_data);
+        DHT11_Status_t dht_status = DHT11_ReadData(&dht11_data);
         char buffer[150];
         
         if (dht_status == DHT11_OK) {
             temperature = DHT11_GetTemperature(&dht11_data);
             humidity = DHT11_GetHumidity(&dht11_data);
+            last_valid_temperature = temperature;  // Store for alert system
+            
             snprintf(buffer, sizeof(buffer), "Temp: %.1f°C, Hum: %.1f%% | Mode: %s | Motor: %s\r\n", 
                      temperature, humidity, 
                      (system_mode == MODE_AUTO) ? "AUTO" : "MANUAL",
@@ -260,15 +269,15 @@ int main(void)
         publish_data_flag = false;
     }
 
-    // Control logic based on current mode (uses last known temperature and humidity)
+    // Control logic based on current mode
     if (system_mode == MODE_AUTO) {
         HandleAutoMode(temperature, humidity);
     } else {
         HandleManualMode();
     }
     
-    // Check for temperature alert (33°C)
-    CheckTemperatureAlert(temperature);
+    // Check for temperature alerts (STM32 handles SMS, dashboard shows notifications)
+    CheckTemperatureAlert(last_valid_temperature);
 
     // Process ESP8266 MQTT data
     ESP8266_ProcessDMAData();
@@ -481,7 +490,23 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(led_GPIO_Port, led_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(motor_GPIO_Port, motor_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : led_Pin */
+  GPIO_InitStruct.Pin = led_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(led_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : dht11_Pin */
+  GPIO_InitStruct.Pin = dht11_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(dht11_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : motor_Pin */
   GPIO_InitStruct.Pin = motor_Pin;
@@ -489,12 +514,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(motor_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : dht11_Pin */
-  GPIO_InitStruct.Pin = dht11_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(dht11_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -622,23 +641,23 @@ void HandleAutoMode(float temperature, float humidity)
     static uint32_t total_runtime = 0;
     uint32_t current_time = HAL_GetTick();
     
-    Motor_State current_motor_state = Motor_GetState();
+    Motor_State_t current_motor_state = Motor_GetState();
     
-    // Control motor based on humidity thresholds
-    if (humidity >= HUMIDITY_THRESHOLD_HIGH) {
-        // Start motor if it's not already running
+    // Control motor based on humidity thresholds (irrigation logic)
+    if (humidity <= HUMIDITY_THRESHOLD_LOW) {
+        // Start motor if it's not already running (soil is dry, needs watering)
         if (current_motor_state != MOTOR_FORWARD) {
             Motor_SetState(MOTOR_FORWARD);
             motor_start_time = current_time;
             PublishMotorStatus("ON");
             
             char buffer[120];
-            snprintf(buffer, sizeof(buffer), "AUTO: Motor ON (humidity: %.1f%% >= %.1f%%)\r\n", 
-                     humidity, HUMIDITY_THRESHOLD_HIGH);
+            snprintf(buffer, sizeof(buffer), "AUTO: Motor ON (humidity: %.1f%% <= %.1f%% - Soil dry, watering)\r\n", 
+                     humidity, HUMIDITY_THRESHOLD_LOW);
             CDC_Transmit_FS((uint8_t*)buffer, strlen(buffer));
         }
-    } else if (humidity <= HUMIDITY_THRESHOLD_LOW) {
-        // Stop motor if it's running
+    } else if (humidity >= HUMIDITY_THRESHOLD_HIGH) {
+        // Stop motor if it's running (soil is wet enough, stop watering)
         if (current_motor_state != MOTOR_STOP) {
             uint32_t runtime = current_time - motor_start_time;
             total_runtime += runtime;
@@ -648,12 +667,12 @@ void HandleAutoMode(float temperature, float humidity)
             
             char buffer[140];
             snprintf(buffer, sizeof(buffer), 
-                     "AUTO: Motor OFF (humidity: %.1f%% <= %.1f%%) Runtime: %lu ms, Total: %lu ms\r\n",
-                     humidity, HUMIDITY_THRESHOLD_LOW, runtime, total_runtime);
+                     "AUTO: Motor OFF (humidity: %.1f%% >= %.1f%% - Soil wet, stop watering) Runtime: %lu ms, Total: %lu ms\r\n",
+                     humidity, HUMIDITY_THRESHOLD_HIGH, runtime, total_runtime);
             CDC_Transmit_FS((uint8_t*)buffer, strlen(buffer));
         }
     }
-    // If humidity is between thresholds (60% < humidity < 80%), maintain current state
+    // If humidity is between thresholds (50% < humidity < 80%), maintain current state
 }
 
 /**
@@ -664,8 +683,8 @@ void HandleManualMode(void)
 {
     // In manual mode, motor state is controlled by motor_manual_state variable
     // which is set via MQTT commands
-    Motor_State desired_state = motor_manual_state ? MOTOR_FORWARD : MOTOR_STOP;
-    Motor_State current_state = Motor_GetState();
+    Motor_State_t desired_state = motor_manual_state ? MOTOR_FORWARD : MOTOR_STOP;
+    Motor_State_t current_state = Motor_GetState();
     
     if (current_state != desired_state) {
         Motor_SetState(desired_state);
@@ -683,51 +702,106 @@ void CheckTemperatureAlert(float temperature)
 {
     uint32_t current_time = HAL_GetTick();
     
-    // Check if temperature reaches the threashold value and we haven't sent an alert recently
-    if (temperature >= TEMPERATURE_THRESHOLD && !temperature_alert_sent) {
-        // Check cooldown period (5 minutes)
-        if (current_time - last_sms_time >= SMS_COOLDOWN_TIME) {
-            if (sim800l_initialized) {
-                char sms_message[160];
-                snprintf(sms_message, sizeof(sms_message), 
-                         "ALERT: Temperature reached %.1f°C! System status: Motor %s, Mode: %s",
-                         temperature,
-                         (Motor_GetState() == MOTOR_FORWARD) ? "ON" : "OFF",
-                         (system_mode == MODE_AUTO) ? "AUTO" : "MANUAL");
-                
-                // Publish SMS sending status
-                if (mqtt_connected) {
-                    ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "SENDING:Temperature alert SMS");
-                }
-                
-                SIM800L_Status_t sms_status = SIM800L_SendSMS(SMS_PHONE_NUMBER, sms_message);
-                if (sms_status == SIM800L_OK) {
-                    temperature_alert_sent = true;
-                    last_sms_time = current_time;
+    // Track sustained high temperature (6 seconds)
+    if (temperature >= TEMPERATURE_THRESHOLD) {
+        if (!high_temp_detected) {
+            high_temp_detected = true;
+            high_temp_start_time = current_time;
+            
+            // Notify dashboard that high temp is detected
+            if (mqtt_connected) {
+                ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "HIGH_TEMP:Temperature above threshold detected");
+            }
+        }
+        
+        // Send SMS if temperature has been high for 6+ seconds
+        uint32_t high_temp_duration = current_time - high_temp_start_time;
+        if (high_temp_duration >= 6000) { // 6 seconds sustained
+            // Check cooldown period
+            if (current_time - last_sms_time >= SMS_COOLDOWN_TIME) {
+                if (sim800l_initialized) {
+                    char sms_message[160];
+                    snprintf(sms_message, sizeof(sms_message), 
+                             "ALERT: Temperature reached %.1f°C for %.1fs! System status: Motor %s, Mode: %s",
+                             temperature, high_temp_duration / 1000.0f,
+                             (Motor_GetState() == MOTOR_FORWARD) ? "ON" : "OFF",
+                             (system_mode == MODE_AUTO) ? "AUTO" : "MANUAL");
                     
-                    // Publish SMS sent status
+                    // Notify dashboard
                     if (mqtt_connected) {
-                        ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "SENT:Temperature alert SMS sent successfully");
+                        ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "SENDING:Sending temperature alert SMS");
                     }
                     
-                    char log_msg[] = "Temperature Alert SMS sent successfully\r\n";
-                    CDC_Transmit_FS((uint8_t*)log_msg, strlen(log_msg));
+                    SIM800L_Status_t sms_status = SIM800L_SendSMS(SMS_PHONE_NUMBER, sms_message);
+                    if (sms_status == SIM800L_OK) {
+                        temperature_alert_sent = true;
+                        last_sms_time = current_time;
+                        
+                        // Notify dashboard
+                        if (mqtt_connected) {
+                            ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "SENT:Temperature alert SMS sent successfully");
+                        }
+                        
+                        char log_msg[100];
+                        snprintf(log_msg, sizeof(log_msg), "Temperature Alert SMS sent (%.1f°C for %.1fs)\r\n", 
+                                 temperature, high_temp_duration / 1000.0f);
+                        CDC_Transmit_FS((uint8_t*)log_msg, strlen(log_msg));
+                    } else {
+                        // Notify dashboard
+                        if (mqtt_connected) {
+                            ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "FAILED:Failed to send temperature alert SMS");
+                        }
+                        
+                        char error_msg[] = "Failed to send Temperature Alert SMS\r\n";
+                        CDC_Transmit_FS((uint8_t*)error_msg, strlen(error_msg));
+                    }
                 } else {
-                    // Publish SMS failed status
+                    // SIM800L not available
                     if (mqtt_connected) {
-                        ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "FAILED:Failed to send temperature alert SMS");
+                        ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "NO_SIM:SIM800L not initialized - cannot send SMS");
                     }
-                    
-                    char error_msg[] = "Failed to send Temperature Alert SMS\r\n";
-                    CDC_Transmit_FS((uint8_t*)error_msg, strlen(error_msg));
                 }
+            } else {
+                // In cooldown period
+                uint32_t remaining_cooldown = (SMS_COOLDOWN_TIME - (current_time - last_sms_time)) / 1000;
+                
+                // Send status every 30 seconds
+                static uint32_t last_cooldown_update = 0;
+                if (current_time - last_cooldown_update >= 30000) {
+                    if (mqtt_connected) {
+                        char cooldown_status[100];
+                        snprintf(cooldown_status, sizeof(cooldown_status), 
+                                 "COOLDOWN:High temp %.1f°C - Next SMS in %lus", 
+                                 temperature, remaining_cooldown);
+                        ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, cooldown_status);
+                    }
+                    last_cooldown_update = current_time;
+                }
+            }
+        }
+    } else {
+        // Reset high temperature detection if temperature drops
+        if (high_temp_detected) {
+            high_temp_detected = false;
+            high_temp_start_time = 0;
+            
+            // Notify dashboard that temperature is normal
+            if (mqtt_connected) {
+                ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "NORMAL:Temperature below threshold");
             }
         }
     }
     
-    // Reset alert flag if temperature drops below threshold
-    if (temperature < TEMPERATURE_THRESHOLD - 2.0f) { // 2°C hysteresis
-        temperature_alert_sent = false;
+    // Reset alert flag if temperature drops well below threshold (hysteresis)
+    if (temperature < TEMPERATURE_THRESHOLD - 3.0f) { // 3°C hysteresis
+        if (temperature_alert_sent) {
+            temperature_alert_sent = false;
+            
+            // Notify dashboard that alert is cleared
+            if (mqtt_connected) {
+                ESP8266_PublishMQTT(MQTT_TOPIC_SMS_ALERT, "CLEARED:Temperature alert cleared");
+            }
+        }
     }
 }
 

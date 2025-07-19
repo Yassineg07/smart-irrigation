@@ -600,7 +600,7 @@
                 humidityElement.textContent = data.humidity.toFixed(1);
                 
                 // Check if temperature exceeds threshold and add alert styling
-                if (data.temperature >= this.temperatureThreshold) {
+                if (data.temperature >= 33.0 || data.alertActive) {
                     temperatureElement.classList.add('temperature-alert');
                 } else {
                     temperatureElement.classList.remove('temperature-alert');
@@ -694,16 +694,27 @@
                     
                 } else if (status === 'sent') {
                     title.textContent = 'SMS Alert Sent!';
-                    messageElement.textContent = message;
+                    messageElement.textContent = 'Temperature alert SMS sent successfully';
                     cooldownElement.style.display = 'flex';
                     widget.classList.add('show');
                     
-                    // Start cooldown timer (30 seconds)
-                    this.startCooldownTimer(30);
+                    // Start full 5-minute cooldown timer (300 seconds)
+                    this.startCooldownTimer(300);
                     
                 } else if (status === 'failed') {
                     title.textContent = 'SMS Alert Failed';
-                    messageElement.textContent = message;
+                    messageElement.textContent = message || 'Failed to send temperature alert SMS';
+                    cooldownElement.style.display = 'none';
+                    widget.classList.add('show');
+                    
+                    // Hide after 10 seconds
+                    setTimeout(() => {
+                        widget.classList.remove('show');
+                    }, 10000);
+                    
+                } else if (status === 'cleared') {
+                    title.textContent = 'Temperature Alert Cleared';
+                    messageElement.textContent = message || 'Temperature returned to normal levels';
                     cooldownElement.style.display = 'none';
                     widget.classList.add('show');
                     
@@ -711,7 +722,26 @@
                     setTimeout(() => {
                         widget.classList.remove('show');
                     }, 5000);
+                    
+                } else if (status === 'cooldown') {
+                    // Handle cooldown status from STM32 - update message but keep existing timer running
+                    title.textContent = 'SMS Alert Cooldown';
+                    messageElement.textContent = message;
+                    
+                    // Don't reset the timer - let the 5-minute countdown continue smoothly
+                    // Only show cooldown display if not already visible
+                    if (cooldownElement.style.display !== 'flex') {
+                        cooldownElement.style.display = 'flex';
+                        widget.classList.add('show');
+                        
+                        // If no timer is running, start a new 5-minute timer
+                        if (!this.cooldownTimer) {
+                            this.startCooldownTimer(300);
+                        }
+                    }
                 }
+                
+                this.addLog(`SMS Alert: ${status.toUpperCase()} - ${message}`);
             }
 
             startCooldownTimer(seconds) {
@@ -722,9 +752,22 @@
                 let remainingSeconds = seconds;
                 progressElement.style.width = '100%';
                 
+                // Helper function to format time
+                const formatTime = (totalSeconds) => {
+                    const minutes = Math.floor(totalSeconds / 60);
+                    const seconds = totalSeconds % 60;
+                    if (minutes > 0) {
+                        return `${minutes}m ${seconds}s`;
+                    }
+                    return `${seconds}s`;
+                };
+                
+                // Initial display
+                timerElement.textContent = formatTime(remainingSeconds);
+                
                 this.cooldownTimer = setInterval(() => {
                     remainingSeconds--;
-                    timerElement.textContent = `${remainingSeconds}s`;
+                    timerElement.textContent = formatTime(remainingSeconds);
                     
                     // Update progress bar
                     const progress = (remainingSeconds / seconds) * 100;

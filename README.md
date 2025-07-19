@@ -1,99 +1,150 @@
 # Smart Irrigation System
 
-An intelligent IoT-based irrigation system built with STM32F407 microcontroller, ESP8266 WiFi module, and environmental sensors. The system provides automated watering based on environmental conditions and remote monitoring through a web dashboard.
+IoT-based automatic irrigation system using STM32F407, ESP8266 WiFi, and environmental sensors with web dashboard control.
+
+![alt text](<Screenshot 2025-07-19 210419.png>)
+![alt text](<Screenshot 2025-07-19 231054.png>)
 
 ## Features
 
-- **Automated Irrigation**: Automatically triggers watering when temperature exceeds configurable threshold (default: 30°C)
-- **Manual Control**: Remote manual override via responsive web dashboard
-- **Real-time Monitoring**: Continuous temperature and humidity sensing with 2-second update intervals
-- **Web Dashboard**: Modern, responsive interface with live data visualization
-- **MQTT Communication**: Reliable IoT messaging protocol for device communication
-- **SMS Alerts**: Optional SMS notifications via GSM module (SIM800L)
-- **Multi-mode Operation**: Seamless switching between automatic and manual modes
+- **Automatic Irrigation**: Activates watering when soil humidity ≤ 50%, stops when ≥ 80%
+- **Manual Override**: Remote control via web dashboard
+- **Real-time Monitoring**: Temperature/humidity updates every 2 seconds
+- **SMS Alerts**: Temperature threshold notifications (33°C) with 5-minute cooldown
+- **Web Dashboard**: Live data and controls accessible from any device
+- **Dual Mode Operation**: Seamless AUTO/MANUAL mode switching
 
-## Hardware Requirements
+## Hardware Components
 
-- **STM32F407VGT6** microcontroller (main controller)
-- **ESP8266** WiFi module (wireless communication)
-- **DHT11** temperature and humidity sensor
-- **Water pump/motor** (irrigation actuator)
-- **SIM800L GSM module** (optional - for SMS alerts)
-- **Power supply** (5V/3.3V depending on components)
-- **Connecting wires and breadboard/PCB**
+| Component | Purpose | Connection Notes |
+|-----------|---------|------------------|
+| **STM32F407VGT6** | Main controller | STM32F407G-DISC1 board |
+| **ESP8266** | WiFi connectivity | UART2 (PA2/PA3) at 115200 baud |
+| **DHT11** | Temperature/humidity sensor | PA8 with voltage divider |
+| **SIM800L** | GSM/SMS module | UART4 (PA0/PA1) at 9600 baud |
+| **Water Pump** | Irrigation actuator | PA15 via L298N H-bridge |
+| **LED Indicator** | Visual status | PD15 (onboard LED) |
 
-## Pin Configuration
+## Circuit Connections
 
-| Component | STM32 Pin | Description |
-|-----------|-----------|-------------|
-| DHT11 Data | PA8 | Temperature/humidity sensor |
-| Motor Control | PD15 | Water pump relay control |
-| ESP8266 UART | UART2 (PA2/PA3) | WiFi module communication |
-| SIM800L UART | UART4 (PA0/PA1) | GSM module communication |
+### DHT11 Sensor (with Voltage Protection)
+```
+DHT11 VCC  → STM32 5V (or external battery)
+DHT11 GND  → STM32 GND
+DHT11 Data → Voltage Divider → STM32 PA8
 
-## Software Architecture
-
-### Embedded Firmware (STM32)
-- **STM32 HAL Libraries**: Hardware abstraction layer
-- **Custom Drivers**: ESP8266, DHT11, Motor, SIM800L
-- **MQTT Client**: Bi-directional communication
-- **Sensor Management**: Environmental data collection
-- **Control Logic**: Automated irrigation decisions
-
-### Web Dashboard (Node.js)
-- **Express.js Server**: HTTP server for web interface
-- **WebSocket Server**: Real-time bidirectional communication
-- **MQTT Client**: Bridge between web interface and STM32
-- **Responsive UI**: Mobile-friendly dashboard design
-
-## MQTT Topic Structure
-
-| Topic | Direction | Purpose |
-|-------|-----------|---------|
-| `irrigation/sensor_data` | STM32 → Dashboard | Environmental sensor readings |
-| `irrigation/motor_status` | STM32 → Dashboard | Water pump status updates |
-| `irrigation/mode_status` | STM32 → Dashboard | System mode (AUTO/MANUAL) |
-| `irrigation/system_status` | STM32 → Dashboard | Complete system state |
-| `irrigation/mode` | Dashboard → STM32 | Mode change commands |
-| `irrigation/motor` | Dashboard → STM32 | Manual pump control |
-| `irrigation/status_request` | Dashboard → STM32 | System status requests |
-| `irrigation/sms_alert` | STM32 → Dashboard | SMS notification status |
-
-## Installation and Setup
-
-### 1. Hardware Assembly
-1. Connect DHT11 sensor data pin to STM32 PA8
-2. Connect motor control relay to STM32 PD15
-3. Wire ESP8266 module to STM32 UART2 (PA2/PA3)
-4. Connect SIM800L GSM module to STM32 UART4 (PA0/PA1) - Optional
-5. Ensure proper power distribution (3.3V for ESP8266, 5V for motor)
-
-### 2. Network Configuration
-Create a `config.h` file in `Core/Inc/` with your network settings:
-```c
-#ifndef CONFIG_H
-#define CONFIG_H
-
-// WiFi Configuration
-#define WIFI_SSID                   "Your_WiFi_Network"
-#define WIFI_PASSWORD               "Your_WiFi_Password"
-
-// MQTT Broker Configuration
-#define MQTT_BROKER_IP              "192.168.1.100"  // Your MQTT broker IP
-#define MQTT_BROKER_PORT            1883
-#define MQTT_CLIENT_ID              "STM32_Irrigation_System"
-
-// SMS Configuration (Optional)
-#define SMS_PHONE_NUMBER            "+1234567890"  // Your phone number
-#define SMS_COOLDOWN_TIME           300000  // 5 minutes in milliseconds
-
-#endif
+Voltage Divider (5V → 3.3V):
+5V ----[10kΩ]----+-----> STM32 PA8 + DHT11 Data
+                 |
+              [20kΩ]
+                 |
+               GND
 ```
 
-### 3. MQTT Broker Setup
-Install and configure an MQTT broker on your network:
+### ESP8266 WiFi Module
+```
+ESP8266 VCC → 3.3V
+ESP8266 GND → GND
+ESP8266 TX  → STM32 PA3 (UART2_RX)
+ESP8266 RX  → STM32 PA2 (UART2_TX)
+```
 
-**Ubuntu/Debian:**
+### SIM800L GSM Module
+```
+SIM800L VCC → 4V Battery (separate power supply)
+SIM800L GND → Common GND
+SIM800L TX  → Voltage Divider → STM32 PA1 (UART4_RX)
+SIM800L RX  → STM32 PA0 (UART4_TX)
+
+TX Voltage Divider (5V → 3.3V):
+SIM800L TX ----[10kΩ]----+-----> STM32 PA1
+                         |
+                      [20kΩ]
+                         |
+                       GND
+```
+
+### Motor Control
+
+**Demo Setup (using onboard LED for visual indication):**
+- STM32 PD15 → Onboard Blue LED (visual indicator)
+
+**Production Setup (real water pump with L298N H-Bridge):**
+```
+Power Supply:
+12V/24V PSU (+) → L298N VCC
+12V/24V PSU (-) → L298N GND
+
+Control Connections:
+STM32 PA15 → L298N IN1 (Motor control signal)
+STM32 GND → L298N GND (Common ground)
+STM32 5V  → L298N +5V (Logic power, if needed)
+
+Motor Connections:
+L298N OUT1 → Water Pump Motor (+)
+L298N OUT2 → Water Pump Motor (-)
+
+L298N Configuration:
+- Connect ENA to 5V (already done with jumper) for full speed (or to PWM pin for speed control)
+- Leave IN2 disconnected or tied to GND
+- IN1 controls motor ON/OFF via STM32 PA15
+```
+
+### USB OTG (Optional)
+- For debugging and monitoring system status via USB CDC
+
+## Software Setup
+
+### 1. Configure Network Settings
+
+**Required Configuration Changes in `Core/Src/main.c`:**
+
+Edit the following defines (located around **lines 40-66**):
+
+```c
+/* WiFi Configuration - Lines 40-41 */
+#define WIFI_SSID                   "Your_WiFi_Network"      // Replace with your WiFi name
+#define WIFI_PASSWORD               "Your_WiFi_Password"     // Replace with your WiFi password
+
+/* MQTT Configuration - Lines 44-46 */
+#define MQTT_BROKER_IP              "192.168.1.100"         // Replace with your MQTT broker IP
+#define MQTT_BROKER_PORT            1883                     // Default MQTT port (usually no change needed)
+#define MQTT_CLIENT_ID              "STM32_Irrigation_System" // Unique client ID (optional to change)
+
+/* SMS Configuration - Lines 66-67 */
+#define SMS_PHONE_NUMBER            "+1234567890"            // Replace with your phone number (+country code)
+#define SMS_COOLDOWN_TIME           300000                   // 5 minutes (change if needed)
+```
+
+**Required Configuration Changes in `websocket/server.js`:**
+
+Edit the following lines (located around **lines 8-25**):
+
+```javascript
+/* Line 8: Web server port */
+const port = 3000;                                          // Change if port 3000 is occupied
+
+/* Line 17: Network interface log message */
+console.log(`- Network: http://YOUR_LOCAL_IP:${port}`);     // Replace YOUR_LOCAL_IP with your computer's IP
+
+/* Line 25: MQTT broker connection */
+const mqttClient = mqtt.connect('mqtt://YOUR_MQTT_BROKER_IP'); // Replace YOUR_MQTT_BROKER_IP with broker IP
+```
+
+**Configuration Summary:**
+- **WiFi Credentials**: Update your network name and password
+- **MQTT Broker IP**: Use your computer's local IP address (where Mosquitto runs)
+- **Phone Number**: Include country code (e.g., +1 for US, +33 for France, +216 for Tunisia)
+- **Dashboard IP**: Must match MQTT broker IP for proper communication
+
+### 2. MQTT Broker Setup
+Install Mosquitto MQTT broker:
+
+**Windows:**
+- Download from [mosquitto.org](https://mosquitto.org/download/)
+- Install and run as service
+
+**Ubuntu/Linux:**
 ```bash
 sudo apt update
 sudo apt install mosquitto mosquitto-clients
@@ -101,156 +152,220 @@ sudo systemctl start mosquitto
 sudo systemctl enable mosquitto
 ```
 
-**Windows:**
-Download and install from [Eclipse Mosquitto](https://mosquitto.org/download/)
-
-**Docker (Cross-platform):**
+**Docker:**
 ```bash
-docker run -it -p 1883:1883 eclipse-mosquitto
+docker run -d -p 1883:1883 --name mosquitto eclipse-mosquitto
 ```
 
-### 4. Dashboard Setup
-1. Navigate to the `websocket` directory
-2. Install Node.js dependencies:
-   ```bash
-   npm install
-   ```
-3. Update `server.js` with your MQTT broker IP
-4. Start the dashboard:
-   ```bash
-   npm start
-   ```
-   Or use the provided batch file on Windows: `start_dashboard.bat`
+### 3. Web Dashboard Setup
 
-### 5. STM32 Programming
-1. Open the project in STM32CubeIDE
-2. Update configuration in `main.c` or include your `config.h`
-3. Build and flash the firmware to STM32F407
-4. Monitor debug output via USB CDC interface
+**Option A: Automated Setup (Recommended)**
+```bash
+cd websocket
+npm install
+npm run setup    # Automated configuration script
+npm start
+```
 
-## Usage Guide
+**Option B: Manual Setup**
+```bash
+cd websocket
+npm install
+# Edit server.js and replace YOUR_MQTT_BROKER_IP with your broker IP
+npm start
+```
 
-### Accessing the Dashboard
-1. Ensure your device is connected to the same WiFi network
-2. Open a web browser and navigate to `http://[BROKER_IP]:3000`
-3. The dashboard will display real-time sensor data and system status
+**Windows users:** Double-click `start_dashboard.bat`
 
-### Operating Modes
-- **AUTO Mode**: System automatically irrigates when temperature exceeds threshold
-- **MANUAL Mode**: Direct control of irrigation pump via dashboard
+### 4. STM32 Programming
+1. Open project in STM32CubeIDE
+2. Update network configuration in main.c
+3. Build and flash to STM32F407
+4. Monitor via USB CDC (optional)
 
-### System Monitoring
-- Temperature and humidity readings update every 2 seconds
-- Motor status shows current pump operation
-- System logs provide activity history
-- SMS alerts notify of important events (if GSM module is connected)
-## Dashboard Features
+## System Operation
 
-- 🌡️ **Environmental Monitoring**: Real-time temperature and humidity display
-- 💧 **Pump Status**: Visual indicator of water pump operation
-- 🎛️ **Control Interface**: Mode switching and manual override controls
-- 📊 **System Dashboard**: Current status, logs, and activity history
-- 📱 **Responsive Design**: Optimized for desktop, tablet, and mobile devices
-- 🔔 **Notification System**: SMS alerts for system events (optional)
+### Automatic Mode Logic
+- **Motor ON**: When soil humidity ≤ 50% (dry soil needs watering)
+- **Motor OFF**: When soil humidity ≥ 80% (soil sufficiently wet)
+- **Hysteresis**: Prevents rapid on/off cycling between 50-80%
+
+### Manual Mode
+- Direct motor control via web dashboard
+- Overrides automatic humidity-based control
+- Instant response to user commands
+
+### SMS Alerts
+- Triggered when temperature ≥ 33°C
+- 5-minute cooldown between alerts
+- Includes system status in message
+
+### Web Dashboard Access
+Open browser and navigate to: `http://[MQTT_BROKER_IP]:3000`
+
+## MQTT Communication
+
+| Topic | Direction | Data Format |
+|-------|-----------|-------------|
+| `irrigation/sensor_data` | STM32 → Dashboard | `T25.5H67.2` |
+| `irrigation/motor_status` | STM32 → Dashboard | `ON` / `OFF` |
+| `irrigation/mode_status` | STM32 → Dashboard | `AUTO` / `MANUAL` |
+| `irrigation/system_status` | STM32 → Dashboard | `T25.5H67.2MOFFDAUTO` |
+| `irrigation/mode` | Dashboard → STM32 | `AUTO` / `MANUAL` |
+| `irrigation/motor` | Dashboard → STM32 | `ON` / `OFF` |
+| `irrigation/status_request` | Dashboard → STM32 | `REQUEST` |
+| `irrigation/sms_alert` | STM32 → Dashboard | `SENT:Alert message` |
+
+## Custom Drivers
+
+This project features **custom-made, general-purpose drivers** developed to be completely independent from the main application code. These drivers are designed for reusability and can be easily integrated into any STM32 project without modifications:
+
+- **esp8266.h/c**: Complete ESP8266 WiFi and MQTT communication driver
+- **dht11.h/c**: DHT11 temperature/humidity sensor interface driver  
+- **motor.h/c**: Generic motor control abstraction driver
+- **sim800l.h/c**: Full SIM800L GSM/SMS functionality driver
+
+**Key Features:**
+- ✅ **Project Independent**: No dependency on main application code
+- ✅ **Plug & Play**: Simply include headers and initialize
+- ✅ **Well Documented**: Clear function definitions and usage examples
+- ✅ **Modular Design**: Each driver handles its own hardware abstraction
+- ✅ **Reusable**: Perfect for other STM32 projects requiring these peripherals
+
+These drivers can be copied to any STM32 project and used immediately without code modifications, making them valuable building blocks for IoT and embedded applications.
+
+## Customization
+
+### SMS Cooldown Timer Duration
+
+**STM32 Configuration (main.c):**
+```c
+/* SMS Configuration - Line ~67 */
+#define SMS_COOLDOWN_TIME           300000  // 5 minutes in milliseconds
+
+// Examples:
+#define SMS_COOLDOWN_TIME           60000   // 1 minute
+#define SMS_COOLDOWN_TIME           180000  // 3 minutes  
+#define SMS_COOLDOWN_TIME           600000  // 10 minutes
+```
+
+**Dashboard Timer (index.html):**
+```javascript
+// Line ~701 - SMS sent handler
+this.startCooldownTimer(300);  // 300 seconds = 5 minutes
+
+// Examples:
+this.startCooldownTimer(60);   // 1 minute
+this.startCooldownTimer(180);  // 3 minutes
+this.startCooldownTimer(600);  // 10 minutes
+```
+
+### Temperature Alert Threshold
+
+**STM32 Temperature Threshold:**
+```c
+/* SMS Temperature Threshold - Line ~59 */
+#define TEMPERATURE_THRESHOLD       33.0f   // Alert when ≥ 33°C
+
+// Examples:
+#define TEMPERATURE_THRESHOLD       30.0f   // Alert at 30°C
+#define TEMPERATURE_THRESHOLD       35.0f   // Alert at 35°C
+#define TEMPERATURE_THRESHOLD       40.0f   // Alert at 40°C
+```
+
+**Dashboard Red Color Alert:**
+```javascript
+// Line ~513 - Temperature threshold for red color
+this.temperatureThreshold = 33.0;  // Should match STM32 threshold
+
+// Line ~602 - Temperature alert styling condition
+if (data.temperature >= 33.0 || data.alertActive) {
+    temperatureElement.classList.add('temperature-alert');
+}
+
+// Examples: Change both values to match your threshold
+this.temperatureThreshold = 30.0;
+if (data.temperature >= 30.0 || data.alertActive) {
+```
+
+### Humidity Control Thresholds
+
+**Irrigation Control Points:**
+```c
+/* Humidity Thresholds - Lines ~60-61 */
+#define HUMIDITY_THRESHOLD_LOW      70.0f  // Turn motor ON when humidity ≤ 70%
+#define HUMIDITY_THRESHOLD_HIGH     80.0f  // Turn motor OFF when humidity ≥ 80%
+
+// Examples:
+// More frequent watering (60-75%):
+#define HUMIDITY_THRESHOLD_LOW      60.0f
+#define HUMIDITY_THRESHOLD_HIGH     75.0f
+
+// Less frequent watering (40-90%):  
+#define HUMIDITY_THRESHOLD_LOW      40.0f
+#define HUMIDITY_THRESHOLD_HIGH     90.0f
+```
+
+**Note:** Always maintain 10-20% gap between LOW and HIGH thresholds to prevent rapid motor cycling.
 
 ## Troubleshooting
 
 ### Common Issues
+**WiFi Connection Failed:**
+- Check ESP8266 3.3V power supply
+- Verify WiFi credentials
+- Ensure strong signal strength
 
-**STM32 Connection Problems:**
-- Verify UART connections and baud rate settings (115200 bps)
-- Check WiFi credentials and network connectivity
-- Ensure MQTT broker is accessible from STM32's network
-- Monitor debug messages via USB CDC interface
+**No Sensor Readings:**
+- Verify DHT11 connections and voltage divider
+- Check 5V power supply to sensor
+- Allow 2-second sensor warm-up time
 
-**Dashboard Access Issues:**
-- Confirm Node.js is properly installed (version 12.0 or higher)
-- Check if MQTT broker is running and accessible
-- Verify firewall settings allow port 3000 and 1883
-- Ensure device is on the same network as the STM32
+**MQTT Not Connecting:**
+- Verify broker IP address and port (1883)
+- Check firewall settings
+- Ensure broker is running
 
-**WiFi Connectivity Problems:**
-- Verify ESP8266 power supply (stable 3.3V)
-- Check WiFi signal strength at installation location
-- Ensure network credentials are correct
-- Verify MQTT broker allows client connections
+**SMS Not Sending:**
+- Check SIM800L 4V power supply
+- Verify SIM card and network registration
+- Confirm phone number format (+country code)
 
-**Sensor Reading Issues:**
-- Check DHT11 sensor connections and power supply
-- Verify sensor is not damaged or expired
-- Ensure adequate sensor warm-up time (2 seconds)
-- Check for electromagnetic interference
+### Debug Monitoring
+- Use USB CDC for real-time system logs
+- Monitor MQTT traffic with MQTT Explorer
+- Check browser console for dashboard errors
 
-### Debug Tips
-1. Use STM32's USB CDC interface for real-time debugging
-2. Monitor MQTT traffic using tools like MQTT Explorer
-3. Check browser developer console for JavaScript errors
-4. Verify all hardware connections with multimeter
+## Future Enhancements
+
+Planned upgrades and features:
+- Motor speed control panel
+- Configurable humidity/temperature thresholds
+- Energy consumption monitoring
+- Irrigation scheduling system
+- Multiple sensor zones
+- Data logging and analytics
+- Mobile app integration
 
 ## Technical Specifications
 
-| Component | Specification |
-|-----------|---------------|
-| **Microcontroller** | STM32F407VGT6 (168MHz ARM Cortex-M4F) |
-| **WiFi Module** | ESP8266 (802.11 b/g/n, 2.4GHz) |
-| **Sensor** | DHT11 (Temperature: 0-50°C, Humidity: 20-90% RH) |
-| **Communication** | UART, USB CDC, WiFi, MQTT |
-| **Update Rate** | 2 seconds for sensor readings |
-| **Temperature Threshold** | 30°C (user configurable) |
-| **Power Supply** | 5V DC (with 3.3V regulation for ESP8266) |
-| **Operating Temperature** | -10°C to +70°C |
-
-## Project Structure
-
-```
-smart-irrigation/
-├── Core/
-│   ├── Inc/
-│   │   ├── main.h              # Main application header
-│   │   ├── esp8266.h           # ESP8266 WiFi driver
-│   │   ├── dht11.h             # DHT11 sensor driver
-│   │   ├── motor.h             # Motor control driver
-│   │   └── sim800l.h           # SIM800L GSM driver
-│   └── Src/
-│       ├── main.c              # Main application logic
-│       ├── esp8266.c           # ESP8266 implementation
-│       ├── dht11.c             # DHT11 sensor implementation
-│       ├── motor.c             # Motor control implementation
-│       └── sim800l.c           # SIM800L GSM implementation
-├── websocket/
-│   ├── server.js               # Node.js web server
-│   ├── package.json            # Node.js dependencies
-│   ├── start_dashboard.bat     # Windows startup script
-│   └── public/
-│       └── index.html          # Web dashboard interface
-├── Drivers/                    # STM32 HAL drivers
-├── USB_DEVICE/                 # USB CDC implementation
-├── .gitignore                  # Git ignore rules
-└── README.md                   # This file
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/new-feature`)
-3. Commit your changes (`git commit -am 'Add new feature'`)
-4. Push to the branch (`git push origin feature/new-feature`)
-5. Create a Pull Request
+- **MCU**: STM32F407VGT6 (168MHz ARM Cortex-M4F)
+- **WiFi**: ESP8266 (802.11 b/g/n, 2.4GHz)
+- **Sensor**: DHT11 (0-50°C, 20-90% RH, ±2°C/±5% accuracy)
+- **Communication**: UART, USB CDC, WiFi, MQTT, GSM
+- **Update Rate**: 2-second sensor intervals
+- **Power**: 5V (STM32), 3.3V (ESP8266), 4V (SIM800L)
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - Open source project for educational and commercial use.
 
 ## Support
 
-For questions, issues, or contributions:
-- Create an issue on GitHub
-- Check the troubleshooting section above
-- Review the technical documentation in source files
+For issues or questions:
+- Check troubleshooting section above
+- Review debug output via USB CDC
+- Create issue on GitHub repository
 
-## Acknowledgments
 
-- STMicroelectronics for STM32 HAL libraries
-- ESP8266 community for WiFi module documentation
-- Node.js and npm communities for web technologies
-- MQTT.org for IoT communication protocol
+

@@ -15,6 +15,9 @@ const server = app.listen(port, '0.0.0.0', () => {
     console.log(`Smart Irrigation Dashboard running at:`);
     console.log(`- Local: http://localhost:${port}`);
     console.log(`- Network: http://YOUR_LOCAL_IP:${port}`);
+    console.log(`STM32 handles SMS alerts automatically, Dashboard shows notifications`);
+    console.log(`Temperature threshold: 33°C (handled by STM32)`);
+    console.log(`SMS cooldown: 5 minutes (handled by STM32)`);
     console.log(`Access from any device on your WiFi network!`);
 });
 
@@ -88,6 +91,8 @@ mqttClient.on('connect', () => {
     mqttClient.subscribe('irrigation/mode_status');
     mqttClient.subscribe('irrigation/system_status');
     mqttClient.subscribe('irrigation/sms_alert');
+    
+    console.log('Subscribed to MQTT topics for irrigation system');
 });
 
 mqttClient.on('message', (topic, message) => {
@@ -153,16 +158,20 @@ mqttClient.on('message', (topic, message) => {
                 data: systemState
             });
         } else if (topic === 'irrigation/sms_alert') {
-            // Handle SMS alert messages: "SENDING:message" or "SENT:message" or "FAILED:message"
+            // Handle SMS alert notifications from STM32
+            // Formats: "SENDING:message", "SENT:message", "FAILED:message", "COOLDOWN:message", etc.
             const parts = messageStr.split(':');
             if (parts.length >= 2) {
                 const status = parts[0].toLowerCase();
                 const message = parts.slice(1).join(':');
                 
+                console.log(`SMS Alert from STM32: ${status.toUpperCase()} - ${message}`);
+                
                 broadcastToClients({
                     type: 'sms_alert',
                     status: status,
-                    message: message
+                    message: message,
+                    timestamp: new Date().toISOString()
                 });
             }
         }
